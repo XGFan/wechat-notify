@@ -65,7 +65,7 @@ fun main(args: Array<String>) {
                 .title(title)
                 .description(content)
                 .toUser(user)
-                .url("$baseUrl/message/$randomId")
+                .url("$baseUrl/wechat/$randomId")
                 .build()
         if (wxCpService.messageSend(message).errCode == 0) {
             jedis.set(randomId + "|title", title, "NX", "EX", aweek)
