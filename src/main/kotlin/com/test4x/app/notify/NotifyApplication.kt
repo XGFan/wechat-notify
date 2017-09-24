@@ -51,7 +51,6 @@ fun main(args: Array<String>) {
     val detailView = JtwigTemplate.classpathTemplate("templates/wechat.twig")
 
     Spark.port(properties.getProperty("server.port", "8080").toInt())
-    Spark.threadPool(Runtime.getRuntime().availableProcessors() * 2)
     Spark.after(Filter { req, res ->
         res.header("Content-Encoding", "gzip")
 
