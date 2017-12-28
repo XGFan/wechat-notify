@@ -7,6 +7,8 @@ import org.apache.commons.io.FileUtils
 import org.apache.commons.lang3.RandomStringUtils
 import org.jtwig.JtwigModel
 import org.jtwig.JtwigTemplate
+import org.mapdb.DBMaker
+import org.mapdb.Serializer
 import org.slf4j.LoggerFactory
 import redis.clients.jedis.Jedis
 import spark.Filter
@@ -14,10 +16,9 @@ import spark.Spark
 import java.io.File
 import java.util.*
 
+
 fun main(args: Array<String>) {
     val logger = LoggerFactory.getLogger("notify")
-
-    val aweek = 7 * 24 * 60 * 60L
 
     val properties = Properties()
     val configFile = File("application.properties")
@@ -38,12 +39,39 @@ fun main(args: Array<String>) {
     val wxCpService = WxCpServiceImpl()
     wxCpService.wxCpConfigStorage = wxCpConfigStorage
 
-    val host = properties.getProperty("redis.host", "127.0.0.1")
-    val port = properties.getProperty("redis.port", "6379").toInt()
-    val pwd = properties.getProperty("redis.password")
-    val jedis = Jedis(host, port)
-    if (pwd != null) {
-        jedis.auth(pwd)
+    val redisMode = properties.getProperty("redis.enable", "false").toBoolean()
+
+    val repo = if (redisMode) {
+        val host = properties.getProperty("redis.host", "127.0.0.1")
+        val port = properties.getProperty("redis.port", "6379").toInt()
+        val pwd = properties.getProperty("redis.password")
+        val jedis = Jedis(host, port)
+        if (pwd != null) {
+            jedis.auth(pwd)
+        }
+        object : Repo {
+            override fun put(key: String, value: String) {
+                jedis.set(key, value)
+            }
+
+            override fun get(key: String): String? = jedis[key]
+        }
+    } else {
+        val db = DBMaker
+                .fileDB("notify.db")
+                .fileMmapEnable()
+                .transactionEnable()
+                .make()
+        val map = db.hashMap("map", Serializer.STRING, Serializer.STRING).createOrOpen()
+
+        object : Repo {
+            override fun put(key: String, value: String) {
+                map.put(key, value)
+                db.commit()
+            }
+
+            override fun get(key: String): String? = map[key]
+        }
     }
 
     val baseUrl = properties.getProperty("baseUrl")
@@ -68,8 +96,8 @@ fun main(args: Array<String>) {
                 .url("$baseUrl/wechat/$randomId")
                 .build()
         if (wxCpService.messageSend(message).errCode == 0) {
-            jedis.set(randomId + "|title", title, "NX", "EX", aweek)
-            jedis.set(randomId + "|content", content, "NX", "EX", aweek)
+            repo.put(randomId + "|title", title)
+            repo.put(randomId + "|content", content)
             logger.info("{}|{}|{}", randomId, title, content)
             "ok"
         } else {
@@ -78,8 +106,8 @@ fun main(args: Array<String>) {
     }
     Spark.get("wechat/:randomId") { req, res ->
         val randomId = req.params(":randomId")
-        val title = jedis.get(randomId + "|title") ?: return@get "Error"
-        val content = jedis.get(randomId + "|content") ?: return@get "Error"
+        val title = repo.get(randomId + "|title") ?: return@get "Error"
+        val content = repo.get(randomId + "|content") ?: return@get "Error"
         val model = JtwigModel.newModel().with("title", title).with("content", content)
         detailView.render(model)
     }

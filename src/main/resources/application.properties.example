@@ -1,9 +1,11 @@
-corpId=your corp id
-agentId=your agent id
-agentSecret=your secret
+corpId=your_corp_id
+agentId=your_agent_id
+agentSecret=your_secret
 
+baseUrl=http://www.qq.com
+
+redis.enable=false
 redis.host=127.0.0.1
 redis.port=6379
 
-baseUrl=http://www.qq.com
 server.port=8080
