@@ -96,8 +96,8 @@ fun main(args: Array<String>) {
                 .url("$baseUrl/wechat/$randomId")
                 .build()
         if (wxCpService.messageSend(message).errCode == 0) {
-            repo.put(randomId + "|title", title)
-            repo.put(randomId + "|content", content)
+            repo.put("$randomId|title", title)
+            repo.put("$randomId|content", content)
             logger.info("{}|{}|{}", randomId, title, content)
             "ok"
         } else {
@@ -110,6 +110,26 @@ fun main(args: Array<String>) {
         val content = repo.get(randomId + "|content") ?: return@get "Error"
         val model = JtwigModel.newModel().with("title", title).with("content", content)
         detailView.render(model)
+    }
+    Spark.post("mail2Wechat/:user") { req, res ->
+        val title = req.queryMap("subject").value();
+        val content = req.queryMap("body-plain").value()
+        val toUser = req.params(":user")
+        val randomId = RandomStringUtils.randomAlphanumeric(16)
+        val message = WxCpMessage.TEXTCARD()
+                .title(title)
+                .description(content)
+                .toUser(toUser)
+                .url("$baseUrl/wechat/$randomId")
+                .build()
+        if (wxCpService.messageSend(message).errCode == 0) {
+            repo.put("$randomId|title", title)
+            repo.put("$randomId|content", content)
+            logger.info("{}|{}|{}", randomId, title, content)
+            "ok"
+        } else {
+            "fail"
+        }
     }
 }
 
