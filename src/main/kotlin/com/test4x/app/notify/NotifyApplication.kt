@@ -3,48 +3,36 @@ package com.test4x.app.notify
 import me.chanjar.weixin.cp.api.impl.WxCpServiceImpl
 import me.chanjar.weixin.cp.bean.WxCpMessage
 import me.chanjar.weixin.cp.config.WxCpInMemoryConfigStorage
-import org.apache.commons.io.FileUtils
 import org.apache.commons.lang3.RandomStringUtils
 import org.jtwig.JtwigModel
 import org.jtwig.JtwigTemplate
-import org.mapdb.DBMaker
-import org.mapdb.Serializer
 import org.slf4j.LoggerFactory
 import redis.clients.jedis.Jedis
 import spark.Filter
 import spark.Spark
 import java.io.File
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 
 fun main(args: Array<String>) {
     val logger = LoggerFactory.getLogger("notify")
 
-    val properties = Properties()
-    val configFile = File("application.properties")
-    try {
-        properties.load(configFile.inputStream())
-    } catch (e: Exception) {
-        println("application.properties not found")
-        val exampleConfig = ClassLoader.getSystemResourceAsStream("application.properties.example")
-        FileUtils.copyInputStreamToFile(exampleConfig, File("application.properties.example"))
-        System.exit(-1)
-    }
+    val config = Config(File("application.properties"))
 
     val wxCpConfigStorage = WxCpInMemoryConfigStorage()
-    wxCpConfigStorage.corpId = properties.getProperty("corpId")
-    wxCpConfigStorage.agentId = properties.getProperty("agentId").toInt()
-    wxCpConfigStorage.corpSecret = properties.getProperty("agentSecret")
+    wxCpConfigStorage.corpId = config.get("corpId")
+    wxCpConfigStorage.agentId = config.get("agentId")?.toInt()
+    wxCpConfigStorage.corpSecret = config.get("agentSecret")
 
     val wxCpService = WxCpServiceImpl()
     wxCpService.wxCpConfigStorage = wxCpConfigStorage
 
-    val redisMode = properties.getProperty("redis.enable", "false").toBoolean()
-
+    val redisMode = (config.get("redis.enable") ?: "false").toBoolean()
     val repo = if (redisMode) {
-        val host = properties.getProperty("redis.host", "127.0.0.1")
-        val port = properties.getProperty("redis.port", "6379").toInt()
-        val pwd = properties.getProperty("redis.password")
+        val host = config.get("redis.host") ?: "127.0.0.1"
+        val port = config.get("redis.port")?.toInt() ?: 6379
+        val pwd = config.get("redis.password")
         val jedis = Jedis(host, port)
         if (pwd != null) {
             jedis.auth(pwd)
@@ -57,28 +45,21 @@ fun main(args: Array<String>) {
             override fun get(key: String): String? = jedis[key]
         }
     } else {
-        val db = DBMaker
-                .fileDB("notify.db")
-                .fileMmapEnable()
-                .transactionEnable()
-                .make()
-        val map = db.hashMap("map", Serializer.STRING, Serializer.STRING).createOrOpen()
-
+        val map = ConcurrentHashMap<String, String>()
         object : Repo {
             override fun put(key: String, value: String) {
                 map.put(key, value)
-                db.commit()
             }
 
             override fun get(key: String): String? = map[key]
         }
     }
 
-    val baseUrl = properties.getProperty("baseUrl")
+    val baseUrl = config.get("baseUrl")
 
     val detailView = JtwigTemplate.classpathTemplate("templates/wechat.twig")
 
-    Spark.port(properties.getProperty("server.port", "8080").toInt())
+    Spark.port(config.get("server.port")?.toInt() ?: 8080)
     Spark.after(Filter { req, res ->
         res.header("Content-Encoding", "gzip")
 
@@ -111,10 +92,11 @@ fun main(args: Array<String>) {
         val model = JtwigModel.newModel().with("title", title).with("content", content)
         detailView.render(model)
     }
-    Spark.post("mail2Wechat/:user") { req, res ->
-        val title = req.queryMap("subject").value();
-        val content = req.queryMap("body-plain").value()
-        val toUser = req.params(":user")
+
+    Spark.post("mail2wechat") { req, res ->
+        val title = req.queryParams("subject")
+        val content = req.queryParams("body-plain")
+        val toUser = req.queryParams("recipient").split("@")[0]
         val randomId = RandomStringUtils.randomAlphanumeric(16)
         val message = WxCpMessage.TEXTCARD()
                 .title(title)
@@ -156,4 +138,28 @@ fun randomNumString(len: Int): String {
         stringBuilder.append(i + 48)
     }
     return stringBuilder.toString()
+}
+
+class Config {
+    val properties: Properties = Properties()
+
+    fun get(key: String): String? {
+        return properties[key]?.toString() ?: System.getenv(key)
+    }
+
+    constructor(file: File) {
+        if (!file.exists()) {
+            //
+        } else {
+            properties.load(file.inputStream())
+        }
+    }
+
+
+}
+
+interface Repo {
+    fun put(key: String, value: String)
+
+    fun get(key: String): String?
 }
