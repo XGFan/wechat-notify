@@ -1,6 +1,10 @@
 .idea
-*.iml
+.settings
 target/
 application.properties
 *.log
 *.db
+.project
+.factorypath
+.classpath
+*.iml

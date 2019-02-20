@@ -1,5 +1,7 @@
 package com.test4x.app.notify
 
+import io.lettuce.core.RedisClient
+import io.lettuce.core.RedisURI
 import me.chanjar.weixin.cp.api.impl.WxCpServiceImpl
 import me.chanjar.weixin.cp.bean.WxCpMessage
 import me.chanjar.weixin.cp.config.WxCpInMemoryConfigStorage
@@ -7,7 +9,6 @@ import org.apache.commons.lang3.RandomStringUtils
 import org.jtwig.JtwigModel
 import org.jtwig.JtwigTemplate
 import org.slf4j.LoggerFactory
-import redis.clients.jedis.Jedis
 import spark.Filter
 import spark.Spark
 import java.io.File
@@ -33,22 +34,27 @@ fun main(args: Array<String>) {
         val host = config.get("redis.host") ?: "127.0.0.1"
         val port = config.get("redis.port")?.toInt() ?: 6379
         val pwd = config.get("redis.password")
-        val jedis = Jedis(host, port)
+
+        val builder = RedisURI.Builder.redis(host, port)
         if (pwd != null) {
-            jedis.auth(pwd)
+            builder.withPassword(pwd)
         }
+        val client = RedisClient.create(builder.build())
+        val connection = client.connect()
+        val sync = connection.sync()
+
         object : Repo {
             override fun put(key: String, value: String) {
-                jedis.set(key, value)
+                sync.set(key, value)
             }
 
-            override fun get(key: String): String? = jedis[key]
+            override fun get(key: String): String? = sync[key]
         }
     } else {
         val map = ConcurrentHashMap<String, String>()
         object : Repo {
             override fun put(key: String, value: String) {
-                map.put(key, value)
+                map[key] = value
             }
 
             override fun get(key: String): String? = map[key]
@@ -62,7 +68,6 @@ fun main(args: Array<String>) {
     Spark.port(config.get("server.port")?.toInt() ?: 8080)
     Spark.after(Filter { req, res ->
         res.header("Content-Encoding", "gzip")
-
     })
 
     Spark.post("wechat") { req, res ->
@@ -87,8 +92,8 @@ fun main(args: Array<String>) {
     }
     Spark.get("wechat/:randomId") { req, res ->
         val randomId = req.params(":randomId")
-        val title = repo.get(randomId + "|title") ?: return@get "Error"
-        val content = repo.get(randomId + "|content") ?: return@get "Error"
+        val title = repo.get("$randomId|title") ?: return@get "Error"
+        val content = repo.get("$randomId|content") ?: return@get "Error"
         val model = JtwigModel.newModel().with("title", title).with("content", content)
         detailView.render(model)
     }
