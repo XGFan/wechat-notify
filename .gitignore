@@ -8,3 +8,4 @@ application.properties
 .factorypath
 .classpath
 *.iml
+.notes.txt
